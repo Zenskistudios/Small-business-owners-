@@ -335,21 +335,42 @@ function BookingTab({ user }) {
   const [slots, setSlots] = useState(["9:00 AM","10:00 AM","11:00 AM","2:00 PM","3:00 PM","4:00 PM"]);
   const [newSlot, setNewSlot] = useState("");
   const [booked, setBooked] = useState({});
-  const [selected, setSelected] = useState(null);
-  const [clientName, setClientName] = useState("");
-  const [clientEmail, setClientEmail] = useState("");
-  const [confirmed, setConfirmed] = useState(null);
   const [toast, setToast] = useState("");
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [bookings, setBookings] = useState([]);
+  const [pageSlug, setPageSlug] = useState(null);
+  const [pageId, setPageId] = useState(null);
 
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
-  useEffect(() => { loadBookings(); }, []);
+  useEffect(() => { loadExistingPage(); }, []);
 
-  const loadBookings = async () => {
+  const loadExistingPage = async () => {
+    // Load saved booking page for this user
+    const { data: page } = await supabase
+      .from('booking_pages')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (page) {
+      setBizName(page.biz_name || "");
+      setService(page.service || "");
+      setSlots(page.slots || ["9:00 AM","10:00 AM","11:00 AM","2:00 PM","3:00 PM","4:00 PM"]);
+      setPageSlug(page.slug);
+      setPageId(page.id);
+      loadBookings(page.id);
+    }
+  };
+
+  const loadBookings = async (pid) => {
+    const id = pid || pageId;
+    if (!id) return;
     const { data } = await supabase.from('bookings').select('*')
-      .eq('user_id', user.id).order('created_at', { ascending: false });
+      .eq('booking_page_id', id).order('created_at', { ascending: false });
     if (data) {
       setBookings(data);
       const b = {};
@@ -361,25 +382,45 @@ function BookingTab({ user }) {
   const addSlot = () => { if (newSlot.trim()) { setSlots([...slots, newSlot.trim()]); setNewSlot(""); } };
   const removeSlot = (i) => setSlots(slots.filter((_, idx) => idx !== i));
 
-  const confirm = async () => {
-    if (!selected || !clientName) return;
-    setSaving(true);
-    const { error } = await supabase.from('bookings').insert({
+  const publishPage = async () => {
+    if (!bizName.trim()) { showToast("Please enter your business name first."); return; }
+    setPublishing(true);
+    const slug = bizName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    const payload = {
       user_id: user.id,
-      biz_name: bizName || 'My Business',
-      service: service || 'Consultation',
-      time_slot: selected,
-      client_name: clientName,
-      client_email: clientEmail,
-      status: 'confirmed'
-    });
-    setSaving(false);
-    if (error) { showToast('Error: ' + error.message); return; }
-    setBooked({ ...booked, [selected]: clientName });
-    setConfirmed(selected);
-    setSelected(null); setClientName(""); setClientEmail("");
-    showToast(`Booking confirmed for ${selected}!`);
-    loadBookings();
+      slug,
+      biz_name: bizName,
+      service,
+      slots,
+    };
+
+    let savedId = pageId;
+
+    if (pageId) {
+      // Update existing page
+      const { error } = await supabase.from('booking_pages').update(payload).eq('id', pageId);
+      if (error) { showToast('Error: ' + error.message); setPublishing(false); return; }
+    } else {
+      // Create new page — handle slug collision by appending random suffix
+      const finalSlug = slug + '-' + Math.random().toString(36).slice(2,6);
+      payload.slug = finalSlug;
+      const { data, error } = await supabase.from('booking_pages').insert(payload).select().single();
+      if (error) { showToast('Error: ' + error.message); setPublishing(false); return; }
+      savedId = data.id;
+      setPageId(data.id);
+      setPageSlug(data.slug);
+    }
+
+    setPublishing(false);
+    showToast('Booking page published!');
+    loadBookings(savedId);
+  };
+
+  const copyLink = () => {
+    const url = `${window.location.origin}/book/${pageSlug}`;
+    navigator.clipboard.writeText(url);
+    showToast("Link copied to clipboard!");
   };
 
   const deleteBooking = async (id, slot) => {
@@ -391,19 +432,16 @@ function BookingTab({ user }) {
     showToast('Booking removed.');
   };
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(`https://book.biztoolkit.app/${(bizName||"mybiz").toLowerCase().replace(/\s+/g,"-")}`);
-    showToast("Booking link copied!");
-  };
+  const shareUrl = pageSlug ? `${window.location.origin}/book/${pageSlug}` : null;
 
   return (
     <div>
       <div className="section-title">Booking Page</div>
-      <div className="section-sub">Set up your availability. All bookings saved to your account.</div>
+      <div className="section-sub">Publish your availability and share a real booking link with clients.</div>
 
       <div className="db-status">
-        <span className={`db-dot ${saving ? 'saving' : ''}`}></span>
-        {saving ? 'Saving…' : `${bookings.length} booking${bookings.length !== 1 ? 's' : ''} on record`}
+        <span className={`db-dot ${publishing ? 'saving' : ''}`}></span>
+        {publishing ? 'Publishing…' : pageSlug ? `Live at /book/${pageSlug}` : 'Not published yet'}
       </div>
 
       <div className="card">
@@ -418,11 +456,12 @@ function BookingTab({ user }) {
         <div className="card-title">Available Time Slots</div>
         <div className="time-slots">
           {slots.map((s, i) => (
-            <div key={i} className={`time-slot ${booked[s]?"booked":""} ${selected===s?"selected":""}`}
-              onClick={() => !booked[s] && setSelected(s===selected?null:s)}>
+            <div key={i} className={`time-slot ${booked[s]?"booked":""}`}>
               <span>{s}</span>
-              {!booked[s] && <button className="del-slot" onClick={e=>{e.stopPropagation();removeSlot(i);}}>✕</button>}
-              {booked[s] && <span style={{fontSize:10}}>✓</span>}
+              {!booked[s]
+                ? <button className="del-slot" onClick={()=>removeSlot(i)}>✕</button>
+                : <span style={{fontSize:10}}>✓ {booked[s]}</span>
+              }
             </div>
           ))}
         </div>
@@ -432,32 +471,25 @@ function BookingTab({ user }) {
         </div>
       </div>
 
-      {selected && (
-        <div className="card" style={{borderColor:"#f5a623"}}>
-          <div className="card-title">Book — {selected}</div>
-          <div className="grid-2">
-            <div><label>Client Name</label><input value={clientName} onChange={e=>setClientName(e.target.value)} placeholder="Jane Doe" /></div>
-            <div><label>Email</label><input value={clientEmail} onChange={e=>setClientEmail(e.target.value)} placeholder="jane@email.com" /></div>
-          </div>
-          <div className="flex-end">
-            <button className="btn btn-ghost" onClick={()=>setSelected(null)}>Cancel</button>
-            <button className="btn btn-primary" onClick={confirm} disabled={!clientName||saving}>
-              {saving ? 'Saving…' : 'Confirm Booking'}
-            </button>
-          </div>
-        </div>
-      )}
+      <div className="flex-end">
+        <button className="btn btn-primary" onClick={publishPage} disabled={publishing}>
+          {publishing ? 'Publishing…' : pageSlug ? '🔄 Update Page' : '🚀 Publish Booking Page'}
+        </button>
+      </div>
 
-      {confirmed && (
-        <div className="card" style={{borderColor:"#4caf7d",background:"#4caf7d0d"}}>
-          <div style={{color:"#4caf7d",fontWeight:600}}>✓ Booking confirmed for {confirmed}</div>
-          <div style={{fontSize:13,color:"#6b6b78",marginTop:4}}>Client: {booked[confirmed]}</div>
+      {shareUrl && (
+        <div className="share-box" style={{marginTop:20}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,color:'#6b6b78',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:4}}>Your Booking Link</div>
+            <div className="share-url">{shareUrl}</div>
+          </div>
+          <button className="btn btn-primary" onClick={copyLink}>Copy Link</button>
         </div>
       )}
 
       {bookings.length > 0 && (
-        <div className="card">
-          <div className="card-title">All Bookings ({bookings.length})</div>
+        <div className="card" style={{marginTop:20}}>
+          <div className="card-title">Incoming Bookings ({bookings.length})</div>
           {bookings.map(b => (
             <div key={b.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid #1e1e26'}}>
               <div>
@@ -469,11 +501,6 @@ function BookingTab({ user }) {
           ))}
         </div>
       )}
-
-      <div className="share-box">
-        <div className="share-url">book.biztoolkit.app/{(bizName||"mybiz").toLowerCase().replace(/\s+/g,"-")}</div>
-        <button className="btn btn-primary" onClick={copyLink}>Copy Link</button>
-      </div>
 
       {toast && <div className="success-toast">✓ {toast}</div>}
     </div>
@@ -501,14 +528,20 @@ function AITab() {
     if (!input.trim()) return;
     setLoading(true); setOutput("");
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: activeTool.prompt(input) }] })
       });
       const data = await res.json();
-      setOutput(data.content?.map(b => b.text||"").join("") || "No response.");
-    } catch { setOutput("Error reaching AI. Please try again."); }
+      if (!res.ok) {
+        setOutput(`❌ Error ${res.status}: ${data.error || data.message || JSON.stringify(data)}`);
+      } else if (data.content?.length) {
+        setOutput(data.content.map(b => b.text||"").join(""));
+      } else {
+        setOutput("❌ Unexpected response: " + JSON.stringify(data));
+      }
+    } catch (e) { setOutput("❌ Network error: " + e.message); }
     setLoading(false);
   };
 
@@ -595,16 +628,20 @@ Return ONLY valid JSON (no markdown, no preamble) in this format:
 {"posts":[{"platform":"Instagram","content":"...","hashtags":["tag1","tag2","tag3"]}]}
 One post per platform. Optimized for each platform's style and character limits.`;
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
       });
       const data = await res.json();
-      const text = data.content?.map(b=>b.text||"").join("")||"{}";
-      const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
-      setResults(parsed.posts||[]);
-    } catch { setResults([{ platform:"Error", content:"Failed to generate. Please try again.", hashtags:[] }]); }
+      if (!res.ok) {
+        setResults([{ platform: "Error", content: `❌ Error ${res.status}: ${data.error || data.message || JSON.stringify(data)}`, hashtags: [] }]);
+      } else {
+        const text = data.content?.map(b=>b.text||"").join("")||"{}";
+        const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+        setResults(parsed.posts||[]);
+      }
+    } catch (e) { setResults([{ platform: "Error", content: "❌ Network error: " + e.message, hashtags: [] }]); }
     setLoading(false);
   };
 
