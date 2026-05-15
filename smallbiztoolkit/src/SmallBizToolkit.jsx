@@ -528,7 +528,7 @@ function AITab() {
     if (!input.trim()) return;
     setLoading(true); setOutput("");
     try {
-      const res = await fetch("/api/claude", {
+      const res = await fetch("https://smallbiztoolkit.vercel.app/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: activeTool.prompt(input) }] })
@@ -628,7 +628,7 @@ Return ONLY valid JSON (no markdown, no preamble) in this format:
 {"posts":[{"platform":"Instagram","content":"...","hashtags":["tag1","tag2","tag3"]}]}
 One post per platform. Optimized for each platform's style and character limits.`;
     try {
-      const res = await fetch("/api/claude", {
+      const res = await fetch("https://smallbiztoolkit.vercel.app/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
