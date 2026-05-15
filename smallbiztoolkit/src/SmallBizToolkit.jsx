@@ -531,7 +531,7 @@ function AITab() {
       const res = await fetch("https://smallbiztoolkit.vercel.app/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: activeTool.prompt(input) }] })
+        body: JSON.stringify({ model: "claude-opus-4-5", max_tokens: 1000, messages: [{ role: "user", content: activeTool.prompt(input) }] })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -631,7 +631,7 @@ One post per platform. Optimized for each platform's style and character limits.
       const res = await fetch("https://smallbiztoolkit.vercel.app/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+        body: JSON.stringify({ model: "claude-opus-4-5", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
       });
       const data = await res.json();
       if (!res.ok) {
